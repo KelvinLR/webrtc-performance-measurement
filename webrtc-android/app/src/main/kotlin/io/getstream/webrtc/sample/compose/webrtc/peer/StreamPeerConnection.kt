@@ -17,6 +17,8 @@
 package io.getstream.webrtc.sample.compose.webrtc.peer
 
 import io.getstream.log.taggedLogger
+import io.getstream.webrtc.sample.compose.webrtc.metrics.WebRTCStatsCollector
+import io.getstream.webrtc.sample.compose.webrtc.metrics.WebRTCStatsSender
 import io.getstream.webrtc.sample.compose.webrtc.utils.addRtcIceCandidate
 import io.getstream.webrtc.sample.compose.webrtc.utils.createValue
 import io.getstream.webrtc.sample.compose.webrtc.utils.setValue
@@ -64,7 +66,8 @@ class StreamPeerConnection(
 ) : PeerConnection.Observer {
 
   private val typeTag = type.stringify()
-
+  private val statsSender = WebRTCStatsSender()
+  private lateinit var statsCollector: WebRTCStatsCollector
   private val logger by taggedLogger("Call:PeerConnection")
 
   /**
@@ -101,6 +104,10 @@ class StreamPeerConnection(
   fun initialize(peerConnection: PeerConnection) {
     logger.d { "[initialize] #sfu; #$typeTag; peerConnection: $peerConnection" }
     this.connection = peerConnection
+
+    statsCollector = WebRTCStatsCollector(connection) { stats ->
+      statsSender.send(stats)
+    }
   }
 
   /**
@@ -258,12 +265,24 @@ class StreamPeerConnection(
    * @param newState The new state of the [PeerConnection].
    */
   override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
+
     logger.i { "[onIceConnectionChange] #sfu; #$typeTag; newState: $newState" }
+
     when (newState) {
+
+      PeerConnection.IceConnectionState.CONNECTED,
+      PeerConnection.IceConnectionState.COMPLETED -> {
+        logger.i { "Starting stats collector" }
+        statsCollector.start()
+      }
+
       PeerConnection.IceConnectionState.CLOSED,
       PeerConnection.IceConnectionState.FAILED,
-      PeerConnection.IceConnectionState.DISCONNECTED -> statsJob?.cancel()
-      PeerConnection.IceConnectionState.CONNECTED -> statsJob = observeStats()
+      PeerConnection.IceConnectionState.DISCONNECTED -> {
+        logger.i { "Stopping stats collector" }
+        statsCollector.stop()
+      }
+
       else -> Unit
     }
   }
